@@ -56,10 +56,12 @@ try:
     print("INFO: Pygame mixer initialized successfully.")
 except Exception as e:
     print(f"WARNING: Failed to initialize pygame.mixer: {type(e).__name__} - {e}. Using dummy mixer.")
-    pygame.mixer = DummyPygameMixer()
-    use_dummy_mixer = True
+    # pygame.mixer = DummyPygameMixer() # ダミーへの差し替えを解除
+    # use_dummy_mixer = True # このフラグはmixer初期化の成否で判断する
+    pass # try-exceptの構造を維持するため何かしら必要
 
 # --- Tkinterダミークラス拡張 (前回と同様) ---
+# これらのダミークラス定義は残すが、if __name__ == "__main__": での差し替えは行わない
 class DummyMaster:
     def __init__(self): self.title_val = ""; self._windowingsystem = 'x11'; self.after_ids = {} ; self.last_after_id = 0
     def title(self, val): self.title_val = val
@@ -313,102 +315,15 @@ class KaraokeApp:
 
 
 if __name__ == "__main__":
-    print("INFO: === Starting KaraokeApp Full Workflow Test (No GUI) ===")
+    print("INFO: main.py successfully parsed.")
+    print("INFO: Dummy class definitions remain but are not globally aliased to tk or pygame.mixer.")
+    print("INFO: KaraokeApp class will now use actual tkinter and pygame.mixer (if available).")
+    print("INFO: To run the application GUI, create a root Tk window, instantiate KaraokeApp, and run root.mainloop().")
 
-    # --- Tkinterダミークラスへの差し替え (前回と同様) ---
-    original_Tk = tk.Tk; original_Toplevel = tk.Toplevel; original_Label = tk.Label
-    original_Button = tk.Button; original_Canvas = tk.Canvas; original_Frame = tk.Frame
-    tk.Tk = DummyMaster; tk.Toplevel = DummyMaster; tk.Label = DummyWidget
-    tk.Button = DummyWidget; tk.Canvas = DummyWidget; tk.Frame = DummyFrame
-
-    # --- アプリケーションインスタンス作成 ---
-    root = tk.Tk() # ダミーのメインウィンドウ
-    app = KaraokeApp(root)
-    app.main_status_label.config(text="テスト開始") # メインウィンドウのステータスラベルを更新
-
-    # --- テスト用ファイル準備 ---
-    os.makedirs("outData", exist_ok=True)
-    # 正常系テスト用の音声ファイル (ボーカルと伴奏)
-    sr = 44100; duration = 3.0
-    t_vocal = np.linspace(0, duration, int(sr*duration), False)
-    y_vocal_test = 0.5 * np.sin(2 * np.pi * 440.0 * t_vocal) # A4 for 3s
-    sf.write("test_vocal_orig.wav", y_vocal_test, sr)
-    y_acc_test = np.zeros(int(sr*duration)) # 無音の伴奏
-    sf.write("test_acc_orig.wav", y_acc_test, sr)
-    # 不正な形式のダミーファイル
-    with open("bad_format.wav", "w") as f: f.write("This is not a WAV file")
-    with open("bad_format.mid", "w") as f: f.write("This is not a MIDI file")
-
-    # === 1. 音源準備フローのテスト (正常系) ===
-    print("\n--- Test Case 1: Audio Preparation (Normal Flow) ---")
-    app.select_and_prepare_files("test_vocal_orig.wav", "test_acc_orig.wav")
-    midi_conversion_success = app.convert_vocal_to_midi()
-    assert os.path.exists(app.prepared_vocal_wav), "vocal.wav not created"
-    assert os.path.exists(app.prepared_accompaniment_wav), "accompaniment.wav not created"
-    assert midi_conversion_success and os.path.exists(app.vocal_midi_filepath), "vocal.mid not created"
-    print("Test Case 1: PASSED")
-
-    # === 2. カラオケゲーム起動と再生コントロール (正常系) ===
-    print("\n--- Test Case 2: Karaoke Window, Playback (Normal Flow) ---")
-    if app.show_karaoke_window():
-        app.toggle_play_pause() # Play
-        time.sleep(0.1) # 少し再生時間を進める (ダミーミキサー用)
-        app.draw_pitch_bars(pygame.mixer.music.get_pos() / 1000.0) # 手動で描画をトリガー
-        app.toggle_play_pause() # Pause
-        time.sleep(0.05)
-        app.toggle_play_pause() # Unpause
-        time.sleep(0.1)
-        app.draw_pitch_bars(pygame.mixer.music.get_pos() / 1000.0)
-        app.stop_music()        # Stop
-        app.on_karaoke_window_close() # ウィンドウを閉じる
-        print("Test Case 2: PASSED (check logs for details)")
-    else:
-        print("Test Case 2: FAILED (Karaoke window did not open)")
-
-
-    # === 3. エラーハンドリングテスト ===
-    print("\n--- Test Case 3: Error Handling ---")
-    # 3a. MIDI変換時にvocal.wavがない
-    print("\n--- Test Case 3a: MIDI conversion with missing vocal.wav ---")
-    if os.path.exists(app.prepared_vocal_wav): os.remove(app.prepared_vocal_wav)
-    app.convert_vocal_to_midi() # エラーメッセージがログに出るはず
-
-    # 3b. カラオケ起動時にaccompaniment.wavがない
-    print("\n--- Test Case 3b: Karaoke launch with missing accompaniment.wav ---")
-    app.select_and_prepare_files("test_vocal_orig.wav", None) # vocal.wavだけ準備 (accはコピーされない)
-    app.convert_vocal_to_midi() # vocal.midは作られる
-    if os.path.exists(app.prepared_accompaniment_wav): os.remove(app.prepared_accompaniment_wav) # 念のため削除
-    app.show_karaoke_window()
-
-    # 3c. カラオケ起動時にvocal.midがない
-    print("\n--- Test Case 3c: Karaoke launch with missing vocal.mid ---")
-    app.select_and_prepare_files("test_vocal_orig.wav", "test_acc_orig.wav") #両方準備
-    if os.path.exists(app.vocal_midi_filepath): os.remove(app.vocal_midi_filepath) # MIDIだけ削除
-    app.show_karaoke_window()
-
-    # 3d. 不正なWAVファイルでMIDI変換 (librosaがエラーを出すはず)
-    print("\n--- Test Case 3d: MIDI conversion with bad vocal.wav ---")
-    app.select_and_prepare_files("bad_format.wav", "test_acc_orig.wav")
-    app.convert_vocal_to_midi()
-
-    # 3e. 不正なMIDIファイルでカラオケ起動 (pretty_midiがエラーを出すはず)
-    print("\n--- Test Case 3e: Karaoke launch with bad vocal.mid ---")
-    app.select_and_prepare_files("test_vocal_orig.wav", "test_acc_orig.wav") # 正常なWAV準備
-    # vocal.mid を不正なもので上書き
-    shutil.copy("bad_format.mid", app.vocal_midi_filepath)
-    app.show_karaoke_window()
-
-    print("\n--- Error Handling Tests Finished (check logs for error messages) ---")
-
-    # --- クリーンアップ (テスト用ファイルを削除) ---
-    if os.path.exists("test_vocal_orig.wav"): os.remove("test_vocal_orig.wav")
-    if os.path.exists("test_acc_orig.wav"): os.remove("test_acc_orig.wav")
-    if os.path.exists("bad_format.wav"): os.remove("bad_format.wav")
-    if os.path.exists("bad_format.mid"): os.remove("bad_format.mid")
-    # outDataフォルダは残しても良いが、気になるなら shutil.rmtree("outData")
-
-    print("\nINFO: === KaraokeApp Full Workflow Test Finished ===")
-
-    # 元のTkinterクラスに戻す
-    tk.Tk = original_Tk; tk.Toplevel = original_Toplevel; tk.Label = original_Label
-    tk.Button = original_Button; tk.Canvas = original_Canvas; tk.Frame = original_Frame
+    # --- Example of how to run the actual application ---
+    # root = tk.Tk()
+    # app = KaraokeApp(root)
+    # # Perform any initial file setup here if needed for the app to start
+    # # e.g., app.select_and_prepare_files("path/to/vocal.wav", "path/to/acc.wav")
+    # # app.convert_vocal_to_midi()
+    # root.mainloop()
